@@ -1,5 +1,3 @@
-
-
 // lib/services/sms_service.dart
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart'; // Import for debugPrint
@@ -18,20 +16,16 @@ class SmsService {
       },
     );
 
-    debugPrint('Attempting to launch SMS URI: $smsLaunchUri'); // Log the URI
+    debugPrint('Attempting to launch SMS URI: $smsLaunchUri');
 
     try {
-      // Check if the URI can be launched before attempting
       if (await canLaunchUrl(smsLaunchUri)) {
-        debugPrint('canLaunchUrl returned TRUE for: $smsLaunchUri');
         await launchUrl(smsLaunchUri);
       } else {
-        debugPrint('canLaunchUrl returned FALSE for: $smsLaunchUri');
-        throw 'Could not launch SMS app for $phoneNumber. No component found to handle the URI.';
+        throw 'Could not launch SMS app for $phoneNumber.';
       }
     } catch (e) {
-      debugPrint('Error sending SMS: $e');
-      // Re-throw the exception so the controller can catch and display it
+      debugPrint('Error launching SMS app: $e');
       rethrow;
     }
   }

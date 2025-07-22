@@ -1,18 +1,12 @@
-
-
-
-
-
-
-
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:flutter/material.dart'; // For BuildContext
 import '../models/customer.dart';
+import '../models/history_item.dart';
 import '../services/excel_service.dart';
 import '../services/permission_service.dart';
 import '../services/sms_service.dart';
+import 'history_controller.dart';
 
-// HomeController manages the state and logic for the home page.
 class HomeController extends GetxController {
   final RxList<Customer> customers = <Customer>[].obs;
   final RxString messageToSend = ''.obs;
@@ -22,101 +16,126 @@ class HomeController extends GetxController {
   final ExcelService _excelService = ExcelService();
   final PermissionService _permissionService = PermissionService();
   final SmsService _smsService = SmsService();
+  final HistoryController _historyController = Get.find<HistoryController>();
 
-  @override
-  void onInit() {
-    super.onInit();
-    // Permissions are now requested just before the action that needs them,
-    // and handled by the respective services, often with a BuildContext.
-    // Initial permission check can be done here if you want to show a warning
-    // on app start, but the current approach requests on action.
-  }
-
-  // Imports contacts from an Excel file.
   Future<void> importContacts(BuildContext context) async {
     isLoading.value = true;
-    errorMessage.value = ''; // Clear previous errors
+    errorMessage.value = '';
     try {
-      // The permission check is now handled within ExcelService.importContactsFromExcel
-      final importedCustomers = await _excelService.importContactsFromExcel(context);
+      final importedCustomers = await _excelService.importContactsFromExcel(
+        context,
+      );
       if (importedCustomers.isNotEmpty) {
         customers.assignAll(importedCustomers);
-        errorMessage.value = ''; // Clear any previous error on success
-        Get.snackbar(
-          'Success',
-          '${importedCustomers.length} contacts imported.',
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: Get.theme.primaryColor,
-          colorText: Get.theme.colorScheme.onPrimary,
-        );
       } else {
         errorMessage.value = 'No contacts found or file not selected.';
-        Get.snackbar(
-          'Info',
-          'No contacts imported or file selection cancelled.',
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: Colors.amber,
-          colorText: Colors.black,
-        );
       }
     } catch (e) {
       errorMessage.value = 'Failed to import contacts: ${e.toString()}';
-      Get.snackbar(
-        'Error',
-        'Failed to import contacts: ${e.toString()}',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
     } finally {
       isLoading.value = false;
     }
   }
 
-  // Sends SMS to all imported contacts.
+  // UPDATED METHOD WITH STYLED CONFIRMATION DIALOG
   Future<void> sendSmsToAll(BuildContext context) async {
-    if (customers.isEmpty) {
-      errorMessage.value = 'No contacts imported yet.';
-      return;
-    }
-    if (messageToSend.value.trim().isEmpty) {
-      errorMessage.value = 'Please enter a message to send.';
+    if (customers.isEmpty || messageToSend.value.trim().isEmpty) {
+      errorMessage.value = 'Please import contacts and write a message.';
       return;
     }
 
     isLoading.value = true;
-    errorMessage.value = ''; // Clear previous errors
+    errorMessage.value = '';
+
     try {
-      bool smsGranted = await _permissionService.requestSmsPermission(); // Request SMS permission directly here
+      // Pass the context to the updated permission method
+      bool smsGranted = await _permissionService.requestSmsPermission(context);
       if (!smsGranted) {
-        errorMessage.value = 'SMS permission not granted. Please grant it in settings.';
-        _permissionService._showPermissionDialog(context, 'SMS'); // Show dialog if denied
-        isLoading.value = false;
-        return;
+        throw 'SMS permission not granted. Please grant it in settings.';
       }
 
       for (var customer in customers) {
+        final bool shouldContinue =
+            await Get.dialog(
+              AlertDialog(
+                // --- Style Changes Start Here ---
+                backgroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15.0),
+                ),
+                title: const Row(
+                  children: [
+                    Icon(Icons.contact_support_outlined, color: Colors.black),
+                    SizedBox(width: 10),
+                    Text('Ready for Next?'),
+                  ],
+                ),
+                titleTextStyle: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+                content: Text(
+                  'Press "Continue" to open the SMS app for ${customer.name}.',
+                  style: const TextStyle(fontSize: 16, color: Colors.black54),
+                ),
+                actionsPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                // --- Style Changes End Here ---
+                actions: [
+                  TextButton(
+                    child: const Text(
+                      'Stop Process',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                    onPressed: () => Get.back(result: false),
+                  ),
+                  ElevatedButton(
+                    // --- Style Changes for Button ---
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.black,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                    ),
+                    // --- End of Style Changes ---
+                    child: const Text('Continue'),
+                    onPressed: () => Get.back(result: true),
+                  ),
+                ],
+              ),
+              barrierDismissible: false,
+            ) ??
+            false;
+
+        if (!shouldContinue) {
+          Get.snackbar('Stopped', 'Bulk process stopped by user.');
+          break;
+        }
+
         await _smsService.sendSms(customer.phoneNumber, messageToSend.value);
-        await Future.delayed(const Duration(milliseconds: 700));
+
+        _historyController.addHistoryItem(
+          HistoryItem(
+            customer: customer,
+            message: messageToSend.value,
+            timestamp: DateTime.now(),
+          ),
+        );
       }
-      errorMessage.value = 'SMS apps launched for all contacts. Please send them manually.';
+
       Get.snackbar(
-        'Action Required',
-        'SMS apps launched for ${customers.length} contacts. You need to press SEND for each message.',
+        'Complete',
+        'Finished processing all contacts.',
         snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.blueAccent,
+        backgroundColor: Colors.green,
         colorText: Colors.white,
-        duration: const Duration(seconds: 5),
       );
     } catch (e) {
       errorMessage.value = 'Error sending SMS: ${e.toString()}';
-      Get.snackbar(
-        'Error',
-        'Failed to launch SMS app: ${e.toString()}',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
     } finally {
       isLoading.value = false;
     }
@@ -127,6 +146,149 @@ class HomeController extends GetxController {
   }
 }
 
-extension on PermissionService {
-  void _showPermissionDialog(BuildContext context, String s) {}
-}
+// import 'package:flutter/material.dart';
+// import 'package:get/get.dart';
+// import '../models/customer.dart';
+// import '../models/history_item.dart';
+// import '../services/excel_service.dart';
+// import '../services/permission_service.dart';
+// import '../services/sms_service.dart';
+// import 'history_controller.dart';
+
+// class HomeController extends GetxController {
+//   final RxList<Customer> customers = <Customer>[].obs;
+//   final RxString messageToSend = ''.obs;
+//   final RxBool isLoading = false.obs;
+//   final RxString errorMessage = ''.obs;
+
+//   final ExcelService _excelService = ExcelService();
+//   final PermissionService _permissionService = PermissionService();
+//   final SmsService _smsService = SmsService();
+//   final HistoryController _historyController = Get.find<HistoryController>();
+
+//   Future<void> importContacts(BuildContext context) async {
+//     isLoading.value = true;
+//     errorMessage.value = '';
+//     try {
+//       final importedCustomers = await _excelService.importContactsFromExcel(
+//         context,
+//       );
+//       if (importedCustomers.isNotEmpty) {
+//         customers.assignAll(importedCustomers);
+//       } else {
+//         errorMessage.value = 'No contacts found or file not selected.';
+//       }
+//     } catch (e) {
+//       errorMessage.value = 'Failed to import contacts: ${e.toString()}';
+//     } finally {
+//       isLoading.value = false;
+//     }
+//   }
+
+//   // UPDATED METHOD WITH STYLED CONFIRMATION DIALOG
+//   Future<void> sendSmsToAll(BuildContext context) async {
+//     if (customers.isEmpty || messageToSend.value.trim().isEmpty) {
+//       errorMessage.value = 'Please import contacts and write a message.';
+//       return;
+//     }
+
+//     isLoading.value = true;
+//     errorMessage.value = '';
+
+//     try {
+//       bool smsGranted = await _permissionService.requestSmsPermission();
+//       if (!smsGranted) {
+//         throw 'SMS permission not granted. Please grant it in settings.';
+//       }
+
+//       for (var customer in customers) {
+//         final bool shouldContinue =
+//             await Get.dialog(
+//               AlertDialog(
+//                 // --- Style Changes Start Here ---
+//                 backgroundColor: Colors.white,
+//                 shape: RoundedRectangleBorder(
+//                   borderRadius: BorderRadius.circular(15.0),
+//                 ),
+//                 title: const Row(
+//                   children: [
+//                     Icon(Icons.contact_support_outlined, color: Colors.black),
+//                     SizedBox(width: 10),
+//                     Text('Ready for Next?'),
+//                   ],
+//                 ),
+//                 titleTextStyle: const TextStyle(
+//                   fontSize: 20,
+//                   fontWeight: FontWeight.bold,
+//                   color: Colors.black87,
+//                 ),
+//                 content: Text(
+//                   'Press "Continue" to open the SMS app for ${customer.name}.',
+//                   style: const TextStyle(fontSize: 16, color: Colors.black54),
+//                 ),
+//                 actionsPadding: const EdgeInsets.symmetric(
+//                   horizontal: 16,
+//                   vertical: 10,
+//                 ),
+//                 // --- Style Changes End Here ---
+//                 actions: [
+//                   TextButton(
+//                     child: const Text(
+//                       'Stop Process',
+//                       style: TextStyle(color: Colors.grey),
+//                     ),
+//                     onPressed: () => Get.back(result: false),
+//                   ),
+//                   ElevatedButton(
+//                     // --- Style Changes for Button ---
+//                     style: ElevatedButton.styleFrom(
+//                       backgroundColor: Colors.black,
+//                       foregroundColor: Colors.white,
+//                       shape: RoundedRectangleBorder(
+//                         borderRadius: BorderRadius.circular(8.0),
+//                       ),
+//                     ),
+//                     // --- End of Style Changes ---
+//                     child: const Text('Continue'),
+//                     onPressed: () => Get.back(result: true),
+//                   ),
+//                 ],
+//               ),
+//               barrierDismissible: false,
+//             ) ??
+//             false;
+
+//         if (!shouldContinue) {
+//           Get.snackbar('Stopped', 'Bulk process stopped by user.');
+//           break;
+//         }
+
+//         await _smsService.sendSms(customer.phoneNumber, messageToSend.value);
+
+//         _historyController.addHistoryItem(
+//           HistoryItem(
+//             customer: customer,
+//             message: messageToSend.value,
+//             timestamp: DateTime.now(),
+//           ),
+//         );
+//       }
+
+//       Get.snackbar(
+//         'Complete',
+//         'Finished processing all contacts.',
+//         snackPosition: SnackPosition.BOTTOM,
+//         backgroundColor: Colors.green,
+//         colorText: Colors.white,
+//       );
+//     } catch (e) {
+//       errorMessage.value = 'Error sending SMS: ${e.toString()}';
+//     } finally {
+//       isLoading.value = false;
+//     }
+//   }
+
+//   void updateMessage(String message) {
+//     messageToSend.value = message;
+//   }
+// }

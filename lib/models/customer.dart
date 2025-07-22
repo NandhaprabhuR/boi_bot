@@ -1,22 +1,33 @@
-// lib/models/customer.dart
-// This model represents a single contact with a name and phone number.
+import 'package:excel/excel.dart';
+
 class Customer {
   final String name;
   final String phoneNumber;
 
   Customer({required this.name, required this.phoneNumber});
 
-  // Factory constructor to create a Customer from a list of dynamic values (e.g., from Excel row)
-  factory Customer.fromExcelRow(List<dynamic> row) {
-    // Assuming the first column is name and the second is phone number
-    // Handle potential nulls or incorrect types by converting to String
+  // Convert a Customer instance to a Map
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'phoneNumber': phoneNumber,
+      };
+
+  // Create a Customer instance from a Map
+  factory Customer.fromJson(Map<String, dynamic> json) => Customer(
+        name: json['name'],
+        phoneNumber: json['phoneNumber'],
+      );
+
+  factory Customer.fromExcelRow(List<Data?> row) {
     return Customer(
-      name: row.isNotEmpty && row[0]?.value != null
-          ? row[0]!.value.toString()
-          : 'Unknown Name',
-      phoneNumber: row.length > 1 && row[1]?.value != null
-          ? row[1]!.value.toString()
-          : 'Unknown Number',
+      name: row[0]?.value?.toString() ?? 'No Name',
+      phoneNumber: row[1]!.value.toString().replaceAll(RegExp(r'\.0$'), ''),
     );
   }
 }
+
+
+
+
+
+
